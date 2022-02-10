@@ -12,12 +12,11 @@ version: '3.3'
 services:
   caveservice:
     image: b33rsledge/caveservice:v2
-    container_name: "caveservice"
-    environment: 
+    environment:
       spring.redis.host: rediscs
       spring.redis.port: 6380
       spring.redis.timeout: 60000
-      debug: 0
+      debug: "false"
       storage.room: redisStorage
     ports:
       - "8080:8080"
@@ -25,14 +24,32 @@ services:
       - cs-network
     depends_on:  #not working in swarm mode
       - rediscs
-    command: java -jar /root/caveservice/caveservice.jar
+    command: java -jar /usr/caveservice/caveservice.jar
     deploy:
       placement:
         constraints:
           - node.labels.type == services
+      replicas: 1
+      restart_policy:
+        delay: 5s
+        max_attempts: 5
+    healthcheck:
+      test: curl --fail -s http://localhost:8080/actuator/health || exit 1
+      interval: 30s
+      timeout: 15s
+      retries: 3
+    logging:
+      driver: splunk
+      options:
+        splunk-url: "https://cloud.community.humio.com"
+        splunk-token: "9dd01f8d-9382-4bc8-8de9-918cb55dfa18"
+        splunk-format: "raw"
+        splunk-insecureskipverify: "true"
+        tag: "{{.Name}}/{{.ID}}"
+        labels: "NEurope"
+        env: "PROD"
   rediscs:
     image: redis:6.2.5-alpine
-    container_name: "cs-redis"
     command: --port 6380
     volumes:
       - redisdata_cs:/data/cs
@@ -49,6 +66,11 @@ services:
       placement:
         constraints:
           - node.labels.type == database
+#    healthcheck:
+#      test: ["CMD", "redis-cli", "ping"]
+#      interval: 60s
+#     timeout: 3s
+#      retries: 5
   messageservice:
     image: christianmaintz/sky-cave-message-service:latest
     environment:
@@ -56,7 +78,7 @@ services:
       redis.host: redisms
       redis.port: 6381
       spring.redis.timeout: 60000
-      debug: 0
+      debug: "false"
     ports:
       - "5777:5777"
     deploy:
@@ -70,7 +92,17 @@ services:
       - cs-network
     depends_on:  #not working in swarm mode
       - redisms
-    command: "java -jar  /root/message/sky-cave-message-service-1.0.0.jar"
+    command: "java -jar  /root/message/sky-cave-message-service-1.1.0.jar"
+    logging:
+      driver: splunk
+      options:
+        splunk-url: "https://cloud.community.humio.com"
+        splunk-token: "9dd01f8d-9382-4bc8-8de9-918cb55dfa18"
+        splunk-format: "raw"
+        splunk-insecureskipverify: "true"
+        tag: "{{.Name}}/{{.ID}}"
+        labels: "NEurope"
+        env: "PROD"
   redisms:
     image: redis:6.2.5-alpine
     command: --port 6381
@@ -91,6 +123,45 @@ services:
       - redisdata_ms:/data/ms
     networks:
       - cs-network
+  playerservice:
+    image: "ligaard/player:fatjar-latest"
+    command: java -jar /root/cave/player.jar redis-compose.cpf
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.labels.type == services
+    networks:
+      - cs-network
+    ports:
+      - "7778:7778"
+    depends_on:
+      - redis
+    logging:
+      driver: splunk
+      options:
+        splunk-url: "https://cloud.community.humio.com"
+        splunk-token: "9dd01f8d-9382-4bc8-8de9-918cb55dfa18"
+        splunk-format: "raw"
+        splunk-insecureskipverify: "true"
+        tag: "{{.Name}}/{{.ID}}"
+        labels: "NEurope"
+        env: "PROD"
+  redis:
+    image: "redis:6.2.6-alpine"
+    networks:
+      - cs-network
+    volumes:
+      - redisdata_pl:/data/pl
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.labels.type == database
   visualizer:
     image: dockersamples/visualizer
     volumes:
@@ -110,6 +181,8 @@ volumes:
   redisdata_cs:
     external: false
   redisdata_ms:
+    external: false
+  redisdata_pl:
     external: false
 networks:
   cs-network: {}
